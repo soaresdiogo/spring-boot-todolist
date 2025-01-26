@@ -1,6 +1,5 @@
 package com.diogosoares.todolist.task;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -15,7 +14,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.diogosoares.todolist.utils.Utils;
+import com.diogosoares.todolist.errors.InvalidTaskDateException;
+import com.diogosoares.todolist.errors.TaskNotFoundException;
+import com.diogosoares.todolist.errors.UnauthorizedTaskUpdateException;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -23,49 +24,38 @@ import jakarta.servlet.http.HttpServletRequest;
 @RequestMapping("/tasks")
 public class TaskController {
 
-  @Autowired
-  private ITaskRepository taskRepository;
+    @Autowired
+    private TaskService taskService;
 
-  @PostMapping("/")
-  public ResponseEntity<Object> create(@RequestBody TaskModel taskModel, HttpServletRequest request) {
-    var idUser = request.getAttribute("idUser");
-    taskModel.setIdUser((UUID) idUser);
-
-    var currentDate = LocalDateTime.now();
-    if(currentDate.isAfter(taskModel.getStartAt()) || currentDate.isAfter(taskModel.getEndAt())) {
-      return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("The start and end date must be greater than the current date");
+    @PostMapping("/")
+    public ResponseEntity<Object> create(@RequestBody TaskModel taskModel, HttpServletRequest request) {
+        try {
+            UUID idUser = (UUID) request.getAttribute("idUser");
+            TaskModel task = taskService.createTask(taskModel, idUser);
+            return ResponseEntity.status(HttpStatus.CREATED).body(task);
+        } catch (InvalidTaskDateException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
+        }
     }
 
-    if(taskModel.getStartAt().isAfter(taskModel.getEndAt())) {
-      return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("The start date must be less than the end date");
+    @GetMapping("/")
+    public List<TaskModel> list(HttpServletRequest request) {
+        UUID idUser = (UUID) request.getAttribute("idUser");
+        return taskService.listTasksByUser(idUser);
     }
 
-    var task = this.taskRepository.save(taskModel);
-    return ResponseEntity.status(HttpStatus.OK).body(task);
-  }
-
-  @GetMapping("/")
-  public List<TaskModel> list(HttpServletRequest request) {
-    var idUser = request.getAttribute("idUser");
-    var tasks = this.taskRepository.findByIdUser((UUID) idUser);
-    return tasks;
-  }
-
-  @PutMapping("/{id}")
-  public ResponseEntity<Object> update(@RequestBody TaskModel taskModel, HttpServletRequest request, @PathVariable UUID id) {
-    var idUser = request.getAttribute("idUser");
-
-    var task = this.taskRepository.findById(id).orElse(null);
-    if(task == null) {
-      return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Task not found");
+    @PutMapping("/{id}")
+    public ResponseEntity<Object> update(@RequestBody TaskModel taskModel, 
+                                         HttpServletRequest request, 
+                                         @PathVariable UUID id) {
+        try {
+            UUID idUser = (UUID) request.getAttribute("idUser");
+            TaskModel taskUpdated = taskService.updateTask(id, taskModel, idUser);
+            return ResponseEntity.ok(taskUpdated);
+        } catch (TaskNotFoundException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage());
+        } catch (UnauthorizedTaskUpdateException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(e.getMessage());
+        }
     }
-    if(!task.getIdUser().equals(idUser)) {
-      return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("This user is not owner of this task");
-    }
-
-    Utils.copyNonNullProperties(taskModel, task);
-    var taskUpdated = this.taskRepository.save(task);
-
-    return ResponseEntity.status(HttpStatus.OK).body(taskUpdated);
-  }
 }
